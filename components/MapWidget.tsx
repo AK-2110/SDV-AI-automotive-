@@ -28,8 +28,11 @@ function MapUpdater({ position }: { position: [number, number] }) {
 }
 
 export default function MapWidget({ position, path = [] }: MapProps) {
+    if (!position) return null;
+
     return (
         <MapContainer
+            key="vehicle-map"
             center={position}
             zoom={15}
             style={{ height: "100%", width: "100%", background: "#09090b" }}

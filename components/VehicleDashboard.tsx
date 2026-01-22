@@ -202,7 +202,14 @@ export default function VehicleDashboard() {
                     <StatusWidget icon={Thermometer} label="TEMP" value={data?.temp ?? 20} max={100} unit="°C" color="text-orange-500" />
                     <StatusWidget icon={Droplets} label="OIL" value={98} max={100} unit="%" color="text-yellow-500" />
                     <StatusWidget icon={Disc} label="BRAKE" value={92} max={100} unit="%" color="text-zinc-400" />
-                    <StatusWidget icon={CircleDashed} label="TIRES" value={34} max={40} unit="PSI" color="text-red-400" />
+                    <StatusWidget
+                        icon={CircleDashed}
+                        label="TIRES (MIN)"
+                        value={data?.tpms ? Math.min(data.tpms.fl, data.tpms.fr, data.tpms.rl, data.tpms.rr).toFixed(1) : 0}
+                        max={40}
+                        unit="PSI"
+                        color={data?.tpms && Math.min(data.tpms.fl, data.tpms.fr, data.tpms.rl, data.tpms.rr) < 30 ? "text-red-500 animate-pulse" : "text-cyan-400"}
+                    />
                 </div>
 
                 {/* 2. Main Split: Cluster/Map vs Analysis */}
@@ -211,7 +218,7 @@ export default function VehicleDashboard() {
                     {/* Left: Digital Cluster (Reference Image 2 - Blue Style) */}
                     <div className="col-span-12 lg:col-span-7 grid grid-cols-1 gap-6">
                         {/* Simulation/Map View */}
-                        <div className="flex-1 bg-zinc-950 rounded-2xl border border-zinc-800 relative overflow-hidden flex flex-col">
+                        <div className="flex-1 rounded-3xl border border-white/10 bg-zinc-900/40 backdrop-blur-xl relative overflow-hidden flex flex-col shadow-2xl shadow-blue-900/20">
                             {data?.location ? (
                                 <div className="flex-1 relative">
                                     <MapWidget
@@ -219,42 +226,71 @@ export default function VehicleDashboard() {
                                         path={data.location.route}
                                     />
                                     {/* Overlay HUD */}
-                                    <div className="absolute inset-0 pointer-events-none p-6 flex flex-col justify-between">
+                                    <div className="absolute inset-0 pointer-events-none p-6 flex flex-col justify-between z-10">
                                         <div className="flex justify-between items-start">
-                                            <div className="bg-black/40 backdrop-blur p-2 rounded-lg border border-white/10">
-                                                <div className="text-xs text-zinc-400 font-bold tracking-widest">REAL-TIME GPS</div>
-                                                <div className="text-white font-mono">{useRealGps ? 'ACTIVE' : 'SIMULATED'}</div>
+                                            <div className="bg-black/60 backdrop-blur-md p-3 rounded-2xl border border-white/10 shadow-lg">
+                                                <div className="text-[10px] text-zinc-400 font-bold tracking-[0.2em] mb-1">REAL-TIME GPS</div>
+                                                <div className="text-white font-mono text-sm flex items-center gap-2">
+                                                    <span className={clsx("w-2 h-2 rounded-full", useRealGps ? "bg-green-500 animate-pulse" : "bg-blue-500")}></span>
+                                                    {useRealGps ? 'ACTIVE' : 'SIMULATION'}
+                                                </div>
                                             </div>
-                                            <div className="bg-black/40 backdrop-blur p-2 rounded-lg border border-white/10 text-right">
-                                                <div className="text-4xl font-black text-white italic">{data?.speed ?? 0}</div>
-                                                <div className="text-xs text-blue-400 font-bold">KM/H</div>
+                                            <div className="bg-black/60 backdrop-blur-md p-4 rounded-2xl border border-white/10 text-right shadow-lg min-w-[120px]">
+                                                <div className="text-5xl font-black text-white italic tracking-tighter">{data?.speed ?? 0}</div>
+                                                <div className="text-xs text-blue-400 font-bold tracking-widest mt-1">KM/H</div>
+                                                <div className="text-xs text-zinc-500 font-mono mt-1 border-t border-white/10 pt-1">
+                                                    {data?.rpm ?? 0} <span className="text-[10px]">RPM</span>
+                                                </div>
                                             </div>
                                         </div>
 
                                         {/* Bottom Telemetry Overlay */}
                                         <div className="grid grid-cols-3 gap-4">
-                                            <div className="bg-black/60 backdrop-blur p-2 rounded-lg border border-white/5">
-                                                <div className="text-[10px] text-zinc-500 uppercase">Input</div>
-                                                <div className="flex items-center gap-2">
-                                                    <div className="text-xs font-bold text-white w-8">THR</div>
-                                                    <div className="h-1 flex-1 bg-zinc-700 rounded-full overflow-hidden"><div className="h-full bg-green-500" style={{ width: `${data?.throttle}%` }}></div></div>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <div className="text-xs font-bold text-white w-8">BRK</div>
-                                                    <div className="h-1 flex-1 bg-zinc-700 rounded-full overflow-hidden"><div className="h-full bg-red-500" style={{ width: `${data?.brake}%` }}></div></div>
+                                            <div className="col-span-1 bg-black/60 backdrop-blur-md p-3 rounded-2xl border border-white/10">
+                                                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Pedal Input</div>
+                                                <div className="space-y-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="text-[10px] font-bold text-white w-6">THR</div>
+                                                        <div className="h-1.5 flex-1 bg-zinc-800 rounded-full overflow-hidden">
+                                                            <motion.div
+                                                                className="h-full bg-gradient-to-r from-blue-600 to-cyan-400"
+                                                                animate={{ width: `${data?.throttle}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="text-[10px] font-bold text-white w-6">BRK</div>
+                                                        <div className="h-1.5 flex-1 bg-zinc-800 rounded-full overflow-hidden">
+                                                            <motion.div
+                                                                className="h-full bg-gradient-to-r from-red-600 to-orange-500"
+                                                                animate={{ width: `${data?.brake}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="bg-black/60 backdrop-blur p-2 rounded-lg border border-white/5 flex items-center justify-center gap-4">
+                                            <div className="col-span-2 bg-black/60 backdrop-blur-md p-3 rounded-2xl border border-white/10 flex items-center justify-around">
                                                 {['P', 'R', 'N', 'D'].map(g => (
-                                                    <span key={g} className={clsx("text-xl font-black", data?.gear === g ? "text-blue-500 scale-125" : "text-zinc-700")}>{g}</span>
+                                                    <div key={g} className={clsx("flex flex-col items-center transition-all duration-300", data?.gear === g ? "scale-110" : "opacity-30 scale-90")}>
+                                                        <span className={clsx("text-2xl font-black", data?.gear === g ? "text-transparent bg-clip-text bg-gradient-to-b from-white to-blue-400 filter drop-shadow-[0_0_10px_rgba(59,130,246,0.5)]" : "text-zinc-500")}>
+                                                            {g}
+                                                        </span>
+                                                        {data?.gear === g && <motion.div layoutId="gear-active" className="w-1 h-1 bg-blue-500 rounded-full mt-1" />}
+                                                    </div>
                                                 ))}
                                             </div>
                                         </div>
                                     </div>
+                                    {/* Vignette Overlay */}
+                                    <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/80 via-transparent to-black/20" />
                                 </div>
                             ) : (
-                                <div className="flex-1 flex items-center justify-center text-zinc-600">
-                                    <Navigation size={48} className="animate-pulse" />
+                                <div className="flex-1 flex flex-col items-center justify-center text-zinc-600 gap-4">
+                                    <div className="relative">
+                                        <div className="absolute inset-0 bg-blue-500/20 blur-xl rounded-full animate-pulse" />
+                                        <Navigation size={48} className="relative z-10 text-zinc-500" />
+                                    </div>
+                                    <p className="text-sm font-medium tracking-widest text-zinc-700">INITIALIZING SYSTEMS...</p>
                                 </div>
                             )}
                         </div>
@@ -335,6 +371,11 @@ function StatusWidget({ icon: Icon, label, value, max, unit, color }: any) {
             </div>
 
             <div className="text-[10px] font-bold text-zinc-500 tracking-widest mt-1">{label}</div>
+
+            {/* Added Numeric Value Display */}
+            <div className="text-xs font-mono font-medium text-white">
+                {value} <span className="text-[10px] text-zinc-600">{unit}</span>
+            </div>
         </div>
     );
 }
