@@ -8,192 +8,133 @@ const MISRA_HEADER = `
  * @brief Implementation of Service Oriented Architecture Application
  * @compliance MISRA C++:2008
  * @safety ASIL-B
+ * @generated_by SDV_GenAI_Studio
  */
 `;
 
-function getBatteryResponse() {
-    return {
-        requirements: [
-            "REQ-BMS-001: The system shall monitor the State of Charge (SoC) at 100ms intervals.",
-            "REQ-BMS-002: The system shall trigger a 'Critical Battery' alert if SoC < 10%.",
-            "REQ-BMS-003: The system shall estimate remaining range based on current power consumption.",
-            "REQ-BMS-004: Battery temperature monitoring shall be active during charging.",
-            "REQ-CMP-001: Source code must adhere to MISRA C++:2008 guidelines.",
-            "REQ-TST-001: All safety-critical paths must have 100% branch coverage."
-        ],
-        design: {
-            service: "BatteryHealthService",
-            methods: [
-                { name: "GetSoC", returnType: "uint8", description: "Returns current battery percentage" },
-                { name: "GetRange", returnType: "uint16", description: "Returns estimated range in km" },
-                { name: "GetTemperature", returnType: "float", description: "Returns pack temperature in Celsius" }
-            ],
-            events: [
-                { name: "LowBatteryWarning", payload: "{ level: uint8, remaining_km: uint16 }" }
-            ]
-        },
-        code: `${MISRA_HEADER}
-#include <someip/service.h>
-#include <vehicle/bms_types.h>
+function parsePrompt(prompt: string) {
+    const p = prompt.toLowerCase();
+    let serviceName = "GenericService";
+    let dataPoints = ["Status"];
+    let unit = "";
 
-// MISRA Rule 3-1-1: Class defined in data abstraction
-class BatteryHealthService : public someip::Service {
-private:
-    const uint16_t BATTERY_CAPACITY_KWH = 75; // CONSTANT
+    if (p.includes("battery")) { serviceName = "BatteryHealthService"; dataPoints = ["SoC", "Range", "Temperature"]; unit = "%"; }
+    else if (p.includes("tire")) { serviceName = "TirePressureService"; dataPoints = ["Pressure_FL", "Pressure_FR", "Pressure_RL", "Pressure_RR"]; unit = "PSI"; }
+    else if (p.includes("engine") || p.includes("oil")) { serviceName = "EngineMonitorService"; dataPoints = ["OilPressure", "OilTemp", "RPM"]; unit = "Bar"; }
+    else if (p.includes("door") || p.includes("lock")) { serviceName = "BodyControlService"; dataPoints = ["DoorStatus", "LockState"]; unit = "Bool"; }
+    else if (p.includes("ac") || p.includes("climate")) { serviceName = "ClimateControlService"; dataPoints = ["CabinTemp", "FanSpeed", "CompressorState"]; unit = "C"; }
+    else if (p.includes("speed")) { serviceName = "SpeedLimitService"; dataPoints = ["CurrentSpeed", "Limit", "Zone"]; unit = "km/h"; }
 
-public:
-    BatteryHealthService() : someip::Service("BatteryHealthService", 0x1234) {}
-
-    /**
-     * @brief Retrieve State of Charge
-     * @return uint8_t 0-100%
-     */
-    uint8_t GetSoC() const {
-        // MISRA Rule: No side effects in getter
-        return HAL::Battery::ReadSoC();
-    }
-
-    uint16_t GetRange() const {
-        float consumption = this->GetAverageConsumption();
-        uint8_t soc = this->GetSoC();
-        if (consumption <= 0.0f) {
-            return 0; // Prevent division by zero
+    // Extract generic nouns if still generic
+    if (serviceName === "GenericService") {
+        const words = prompt.split(" ");
+        const nouns = words.filter(w => w.length > 4 && !w.includes("monitor"));
+        if (nouns.length > 0) {
+            serviceName = nouns[0].charAt(0).toUpperCase() + nouns[0].slice(1) + "Service";
+            dataPoints = ["State", "Health", "Diagnostics"];
         }
-        return static_cast<uint16_t>((soc * BATTERY_CAPACITY_KWH) / consumption);
     }
+
+    return { serviceName, dataPoints, unit };
+}
+
+function generateDynamicResponse(prompt: string) {
+    const { serviceName, dataPoints, unit } = parsePrompt(prompt);
+
+    // Dynamic C++ Template
+    const methods = dataPoints.map(dp => `    virtual float Get${dp}() = 0;`).join("\n");
+    const implementation = dataPoints.map(dp => `
+    float Get${dp}() override {
+        // Read from HAL
+        return HAL::ReadSensor("${dp}");
+    }`).join("\n");
+
+    const code = `${MISRA_HEADER}
+#include <someip/service.h>
+#include <vehicle/hal.h>
+
+class I${serviceName} {
+public:
+${methods}
+    virtual ~I${serviceName}() = default;
+};
+
+class ${serviceName} : public someip::Service, public I${serviceName} {
+public:
+    ${serviceName}() : someip::Service("${serviceName}", 0x1000) {}
+
+    void Init() override {
+        LOG_INFO("Initializing ${serviceName}");
+    }
+
+${implementation}
 
     void MonitorLoop() {
         while(true) {
-            if (this->GetSoC() < 10) {
-                // Critical Section
-                this->BroadcastEvent("LowBatteryWarning", { .level = this->GetSoC() });
-            }
+            // Safety Critical Check
+            ${dataPoints.map(dp => `
+            float val_${dp} = this->Get${dp}();
+            if (val_${dp} > HAL::GetLimits("${dp}").max) {
+                 this->BroadcastEvent("Alert", { "${dp}", val_${dp} });
+            }`).join("")}
+            
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
-};
-`,
-        test_cases: `
+};`;
+
+    // Dynamic Test Template
+    const testCases = `
 /**
- * @file test_battery_service.cpp
- * @brief GoogleTest Suite for Battery Service
+ * @file test_${serviceName.toLowerCase()}.cpp
+ * @brief GoogleTest Suite for ${serviceName}
  */
 #include <gtest/gtest.h>
-#include "BatteryHealthService.h"
+#include "${serviceName}.h"
 
-class BatteryServiceTest : public ::testing::Test {
+class ${serviceName}Test : public ::testing::Test {
 protected:
-    BatteryHealthService* service;
-    void SetUp() override { service = new BatteryHealthService(); }
+    ${serviceName}* service;
+    void SetUp() override { service = new ${serviceName}(); }
     void TearDown() override { delete service; }
 };
 
-TEST_F(BatteryServiceTest, TestCriticalBelow10) {
+${dataPoints.map(dp => `
+TEST_F(${serviceName}Test, Test${dp}Range) {
     // Arrange
-    HAL::MockBattery(9); // Set 9%
-    
-    // Act & Assert
-    EXPECT_TRUE(service->IsCritical());
-}
-
-TEST_F(BatteryServiceTest, TestNoDivisionByZero) {
-    // Arrange
-    HAL::MockConsumption(0.0f);
+    HAL::MockSensor("${dp}", 100.0f); // Max Value
     
     // Act
-    uint16_t range = service->GetRange();
+    float val = service->Get${dp}();
     
     // Assert
-    EXPECT_EQ(range, 0); // Safety check
-}
-`
-    };
-}
+    EXPECT_FLOAT_EQ(val, 100.0f);
+}`).join("\n")}
 
-function getTireResponse() {
+TEST_F(${serviceName}Test, TestSafetyCompliance) {
+    // Ensure ASIL-B timeout requirements
+    EXPECT_TRUE(service->CheckTimingConstraints());
+}
+`;
+
+    // Dynamic Requirements
+    const requirements = [
+        `REQ-SYS-001: The ${serviceName} shall monitor ${dataPoints.join(", ")}.`,
+        `REQ-SYS-002: Data shall be reported in ${unit || "SI units"}.`,
+        `REQ-SAF-001: Critical alerts must be broadcast within 20ms using SOME/IP.`,
+        `REQ-CMP-001: Implementation must strictly adhere to MISRA C++:2008.`,
+        `REQ-TST-001: 100% Code Coverage required for ASIL-B certification.`
+    ];
+
     return {
-        requirements: [
-            "REQ-TPMS-001: Monitor pressure of all 4 tires independently.",
-            "REQ-TPMS-002: Alert driver if pressure drops below 30 PSI.",
-            "REQ-TPMS-003: Transmit pressure data to Telematics unit every 1 minute.",
-            "REQ-CMP-001: Rust code must ensure memory safety without 'unsafe' blocks."
-        ],
+        requirements,
         design: {
-            service: "TirePressureService",
-            methods: [
-                { name: "GetPressure", returnType: "float[]", description: "Returns array of 4 pressures" },
-                { name: "SetThreshold", returnType: "void", args: ["min_psi: float"] }
-            ],
-            events: [
-                { name: "PressureDropAlert", payload: "{ tire_index: uint8, pressure: float }" }
-            ]
+            service: serviceName,
+            methods: dataPoints.map(dp => `Get${dp}()`),
+            events: ["Alert", "Diagnostics"]
         },
-        code: `
-// Generated RUST Service Skeleton for TirePressureService
-// Guidelines: Safe Rust Only
-use someip::prelude::*;
-
-struct TirePressureService {
-    threshold: f32,
-    sensors: [Sensor; 4],
-}
-
-impl Service for TirePressureService {
-    fn new() -> Self {
-        TirePressureService { 
-            threshold: 30.0, 
-            sensors: HAL::get_sensors() 
-        }
-    }
-
-    fn check_pressure(&self) -> Vec<f32> {
-        self.sensors.iter().map(|s| s.read()).collect()
-    }
-
-    fn monitor(&self) {
-        loop {
-            // Safety Check: Valid Sensor Range
-            for (i, sensor) in self.sensors.iter().enumerate() {
-                let reading = sensor.read();
-                if reading < 0.0 || reading > 100.0 {
-                    log::error("Sensor Failure on Tire {}", i);
-                    continue; 
-                }
-
-                if reading < self.threshold {
-                    Event::emit("PressureDropAlert", Alert { 
-                        tire_index: i as u8, 
-                        pressure: reading 
-                    });
-                }
-            }
-            thread::sleep(Duration::from_sec(60));
-        }
-    }
-}
-`,
-        test_cases: `
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_pressure_alert_threshold() {
-        let mut service = TirePressureService::new();
-        service.threshold = 32.0;
-        
-        // Mock sensor reading 30.0
-        assert!(service.should_alert(30.0));
-    }
-
-    #[test]
-    fn test_valid_sensor_range() {
-        let service = TirePressureService::new();
-        // Ensure outliers are filtered
-        assert_eq!(service.validate_reading(150.0), false);
-    }
-}
-`
+        code,
+        test_cases: testCases
     };
 }
 
@@ -201,29 +142,8 @@ export async function POST(request: Request) {
     const { prompt } = await request.json();
 
     // Simulate AI processing delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
-    let response;
-
-    if (prompt.toLowerCase().includes('battery')) {
-        response = getBatteryResponse();
-    } else if (prompt.toLowerCase().includes('tire')) {
-        response = getTireResponse();
-    } else {
-        response = {
-            requirements: [
-                "REQ-GEN-001: The service shall provide health status heartbeat.",
-                "REQ-GEN-002: Data throughput must be optimized for CAN bus limitations."
-            ],
-            design: {
-                service: "GenericService",
-                methods: ["Ping()"],
-                events: ["Error"]
-            },
-            code: "// Generic Stub",
-            test_cases: "// No test cases generated for generic prompt."
-        };
-    }
-
+    const response = generateDynamicResponse(prompt);
     return NextResponse.json(response);
 }
